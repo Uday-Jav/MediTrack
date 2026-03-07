@@ -1,7 +1,9 @@
 const fs = require("fs");
 const path = require("path");
+const bcrypt = require("bcrypt");
 const mongoose = require("mongoose");
 const Record = require("../models/Record");
+const User = require("../models/User");
 const { getTokenFromRequest } = require("../middleware/authMiddleware");
 
 const uploadsDir = path.join(__dirname, "..", "uploads");
@@ -27,8 +29,17 @@ const buildRecordResponse = (record, req, authToken = "") => {
   const raw = record.toObject ? record.toObject() : record;
   const recordId = raw._id.toString();
   const baseUrl = getBaseUrl(req);
-  const previewUrl = withTokenQuery(`${baseUrl}/api/records/file/${recordId}/preview`, authToken);
-  const downloadUrl = withTokenQuery(`${baseUrl}/api/records/file/${recordId}/download`, authToken);
+  const storedFileName = path.basename(raw.fileUrl || "");
+  const fileKey = storedFileName || recordId;
+  const encodedFileKey = encodeURIComponent(fileKey);
+  const previewUrl = withTokenQuery(
+    `${baseUrl}/api/records/file/${encodedFileKey}/preview`,
+    authToken
+  );
+  const downloadUrl = withTokenQuery(
+    `${baseUrl}/api/records/file/${encodedFileKey}/download`,
+    authToken
+  );
 
   return {
     ...raw,
@@ -41,6 +52,40 @@ const buildRecordResponse = (record, req, authToken = "") => {
 };
 
 const resolveStoredFilePath = (record) => path.join(uploadsDir, path.basename(record.fileUrl || ""));
+
+const findRecordByFileKey = async (fileKey) => {
+  const normalizedKey = decodeURIComponent(String(fileKey || "")).trim();
+
+  if (!normalizedKey) {
+    return null;
+  }
+
+  if (mongoose.Types.ObjectId.isValid(normalizedKey)) {
+    const recordById = await Record.findById(normalizedKey);
+    if (recordById) {
+      return recordById;
+    }
+  }
+
+  const safeFileName = path.basename(normalizedKey);
+  if (!safeFileName) {
+    return null;
+  }
+
+  return Record.findOne({
+    $or: [{ fileUrl: `/uploads/${safeFileName}` }, { fileName: safeFileName }]
+  }).sort({ createdAt: -1 });
+};
+
+const isRecordOwnedByUser = (record, userId) => {
+  if (!record || !userId) {
+    return false;
+  }
+
+  const ownerId = record.patientId ? String(record.patientId) : "";
+  const altOwnerId = record.userId ? String(record.userId) : "";
+  return ownerId === userId || altOwnerId === userId;
+};
 
 const uploadRecord = async (req, res) => {
   try {
@@ -164,13 +209,13 @@ const getVaultStatus = async (req, res) => {
 
 const previewRecord = async (req, res) => {
   try {
-    const { recordId } = req.params;
+    const fileKey = req.params.filename || req.params.recordId;
 
-    if (!mongoose.Types.ObjectId.isValid(recordId)) {
-      return res.status(400).json({ message: "Invalid recordId." });
+    if (!fileKey) {
+      return res.status(400).json({ message: "Invalid filename." });
     }
 
-    const record = await Record.findById(recordId);
+    const record = await findRecordByFileKey(fileKey);
     if (!record) {
       return res.status(404).json({ message: "Record not found." });
     }
@@ -191,13 +236,13 @@ const previewRecord = async (req, res) => {
 
 const downloadRecord = async (req, res) => {
   try {
-    const { recordId } = req.params;
+    const fileKey = req.params.filename || req.params.recordId;
 
-    if (!mongoose.Types.ObjectId.isValid(recordId)) {
-      return res.status(400).json({ message: "Invalid recordId." });
+    if (!fileKey) {
+      return res.status(400).json({ message: "Invalid filename." });
     }
 
-    const record = await Record.findById(recordId);
+    const record = await findRecordByFileKey(fileKey);
     if (!record) {
       return res.status(404).json({ message: "Record not found." });
     }
@@ -214,11 +259,64 @@ const downloadRecord = async (req, res) => {
   }
 };
 
+const deleteRecord = async (req, res) => {
+  try {
+    const fileKey = req.params.filename || req.params.recordId;
+    const { password } = req.body || {};
+
+    if (!fileKey) {
+      return res.status(400).json({ message: "Invalid filename." });
+    }
+
+    if (!password) {
+      return res.status(400).json({ message: "Password is required to delete a record." });
+    }
+
+    if (!req.user?.id || !mongoose.Types.ObjectId.isValid(req.user.id)) {
+      return res.status(401).json({ message: "Invalid user session." });
+    }
+
+    const record = await findRecordByFileKey(fileKey);
+    if (!record) {
+      return res.status(404).json({ message: "Record not found." });
+    }
+
+    if (!isRecordOwnedByUser(record, req.user.id)) {
+      return res.status(403).json({ message: "You are not allowed to delete this record." });
+    }
+
+    const user = await User.findById(req.user.id).select("+password");
+    if (!user || !user.password) {
+      return res.status(401).json({ message: "User not found." });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: "Invalid password." });
+    }
+
+    const filePath = resolveStoredFilePath(record);
+    await Record.deleteOne({ _id: record._id });
+
+    if (fs.existsSync(filePath)) {
+      await fs.promises.unlink(filePath);
+    }
+
+    return res.status(200).json({
+      message: "Record deleted successfully.",
+      deletedRecordId: record._id
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Could not delete record file.", error: error.message });
+  }
+};
+
 module.exports = {
   uploadRecord,
   getRecordsByPatientId,
   getRecentRecords,
   getVaultStatus,
   previewRecord,
-  downloadRecord
+  downloadRecord,
+  deleteRecord
 };

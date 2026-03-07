@@ -10,7 +10,8 @@ const {
   getRecentRecords,
   getVaultStatus,
   previewRecord,
-  downloadRecord
+  downloadRecord,
+  deleteRecord
 } = require("../controllers/recordController");
 
 const router = express.Router();
@@ -33,8 +34,9 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 router.post("/upload", protect, upload.single("file"), uploadRecord);
-router.get("/file/:recordId/preview", protect, previewRecord);
-router.get("/file/:recordId/download", protect, downloadRecord);
+router.get("/file/:filename/preview", protect, previewRecord);
+router.get("/file/:filename/download", protect, downloadRecord);
+router.delete("/file/:filename", protect, deleteRecord);
 router.get("/:patientId/recent", protect, getRecentRecords);
 router.get("/:patientId/vault-status", protect, getVaultStatus);
 router.get("/:patientId", protect, getRecordsByPatientId);
