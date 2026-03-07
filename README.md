@@ -60,6 +60,8 @@ node server.js
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `POST /api/records/upload` (Protected, `multipart/form-data`: `patientId`, `title`, `description`, `file`)
+- `PATCH /api/records/file/:filename` (Protected, body: `password`, `title` and/or `description`)
+- `DELETE /api/records/file/:filename` (Protected, body: `password`)
 - `GET /api/records/:patientId` (Protected)
 
 ## Recommended Indexes

@@ -118,15 +118,74 @@ const isRecordOwnedByUser = (record, userId) => {
   return ownerId === userId || altOwnerId === userId;
 };
 
+const getAuthenticatedUser = async (req, includePassword = false) => {
+  const authenticatedUserId = normalizeIdValue(req.user?.id);
+  if (!mongoose.Types.ObjectId.isValid(authenticatedUserId)) {
+    return null;
+  }
+
+  const selectedFields = includePassword ? "role vaultAccess password" : "role vaultAccess";
+  return User.findById(authenticatedUserId).select(selectedFields);
+};
+
+const isVaultEnabledForUser = (user) => Boolean(user) && user.vaultAccess !== false;
+
+const canAccessPatientVault = (user, patientId) => {
+  if (!isVaultEnabledForUser(user) || !patientId) {
+    return false;
+  }
+
+  if (user.role === "doctor") {
+    return true;
+  }
+
+  return String(user._id) === String(patientId);
+};
+
+const canAccessRecord = (user, record) => {
+  if (!isVaultEnabledForUser(user) || !record) {
+    return false;
+  }
+
+  if (user.role === "doctor") {
+    return true;
+  }
+
+  return isRecordOwnedByUser(record, String(user._id));
+};
+
+const verifyPassword = async (user, password) => {
+  if (!user?.password || !password) {
+    return false;
+  }
+
+  return bcrypt.compare(password, user.password);
+};
+
 const uploadRecord = async (req, res) => {
   try {
-    const authPatientId = normalizeIdValue(req.user?.id);
+    const authenticatedUser = await getAuthenticatedUser(req);
+    if (!authenticatedUser) {
+      return res.status(401).json({ message: "Invalid user session." });
+    }
+
+    if (!isVaultEnabledForUser(authenticatedUser)) {
+      return res.status(403).json({ message: "Vault access is disabled for this user." });
+    }
+
+    const authPatientId = String(authenticatedUser._id);
     const bodyPatientId = normalizeIdValue(req.body?.patientId);
-    const patientId = req.user?.role === "doctor" ? bodyPatientId || authPatientId : authPatientId || bodyPatientId;
+    const patientId =
+      authenticatedUser.role === "doctor" ? bodyPatientId || authPatientId : authPatientId;
     const { title, description } = req.body;
     const authToken = req.authToken || getTokenFromRequest(req);
 
-    if (!title) {
+    if (authenticatedUser.role !== "doctor" && bodyPatientId && bodyPatientId !== authPatientId) {
+      return res.status(403).json({ message: "You are not allowed to upload records for another user." });
+    }
+
+    const normalizedTitle = typeof title === "string" ? title.trim() : "";
+    if (!normalizedTitle) {
       return res.status(400).json({ message: "title is required." });
     }
 
@@ -145,8 +204,8 @@ const uploadRecord = async (req, res) => {
     const record = await Record.create({
       patientId,
       userId: patientId,
-      title,
-      description: description || "",
+      title: normalizedTitle,
+      description: typeof description === "string" ? description : "",
       fileUrl: `/uploads/${req.file.filename}`,
       fileName: req.file.originalname || req.file.filename,
       mimeType: req.file.mimetype || "application/octet-stream",
@@ -164,12 +223,25 @@ const uploadRecord = async (req, res) => {
 
 const getRecordsByPatientId = async (req, res) => {
   try {
+    const authenticatedUser = await getAuthenticatedUser(req);
+    if (!authenticatedUser) {
+      return res.status(401).json({ message: "Invalid user session." });
+    }
+
     const patientId = resolvePatientIdForRequest(req);
     const search = (req.query.search || req.query.q || "").trim();
     const authToken = req.authToken || getTokenFromRequest(req);
 
+    if (!isVaultEnabledForUser(authenticatedUser)) {
+      return res.status(403).json({ message: "Vault access is disabled for this user." });
+    }
+
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
       return res.status(400).json({ message: "Invalid patientId." });
+    }
+
+    if (!canAccessPatientVault(authenticatedUser, patientId)) {
+      return res.status(403).json({ message: "You are not allowed to access this vault." });
     }
 
     const filter = buildPatientFilter(patientId);
@@ -192,11 +264,24 @@ const getRecordsByPatientId = async (req, res) => {
 
 const getRecentRecords = async (req, res) => {
   try {
+    const authenticatedUser = await getAuthenticatedUser(req);
+    if (!authenticatedUser) {
+      return res.status(401).json({ message: "Invalid user session." });
+    }
+
     const patientId = resolvePatientIdForRequest(req);
     const authToken = req.authToken || getTokenFromRequest(req);
 
+    if (!isVaultEnabledForUser(authenticatedUser)) {
+      return res.status(403).json({ message: "Vault access is disabled for this user." });
+    }
+
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
       return res.status(400).json({ message: "Invalid patientId." });
+    }
+
+    if (!canAccessPatientVault(authenticatedUser, patientId)) {
+      return res.status(403).json({ message: "You are not allowed to access this vault." });
     }
 
     const parsedLimit = Number.parseInt(req.query.limit, 10);
@@ -218,10 +303,23 @@ const getRecentRecords = async (req, res) => {
 
 const getVaultStatus = async (req, res) => {
   try {
+    const authenticatedUser = await getAuthenticatedUser(req);
+    if (!authenticatedUser) {
+      return res.status(401).json({ message: "Invalid user session." });
+    }
+
     const patientId = resolvePatientIdForRequest(req);
+
+    if (!isVaultEnabledForUser(authenticatedUser)) {
+      return res.status(403).json({ message: "Vault access is disabled for this user." });
+    }
 
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
       return res.status(400).json({ message: "Invalid patientId." });
+    }
+
+    if (!canAccessPatientVault(authenticatedUser, patientId)) {
+      return res.status(403).json({ message: "You are not allowed to access this vault." });
     }
 
     const records = await Record.find(buildPatientFilter(patientId))
@@ -247,7 +345,16 @@ const getVaultStatus = async (req, res) => {
 
 const previewRecord = async (req, res) => {
   try {
+    const authenticatedUser = await getAuthenticatedUser(req);
+    if (!authenticatedUser) {
+      return res.status(401).json({ message: "Invalid user session." });
+    }
+
     const fileKey = req.params.filename || req.params.recordId;
+
+    if (!isVaultEnabledForUser(authenticatedUser)) {
+      return res.status(403).json({ message: "Vault access is disabled for this user." });
+    }
 
     if (!fileKey) {
       return res.status(400).json({ message: "Invalid filename." });
@@ -256,6 +363,10 @@ const previewRecord = async (req, res) => {
     const record = await findRecordByFileKey(fileKey);
     if (!record) {
       return res.status(404).json({ message: "Record not found." });
+    }
+
+    if (!canAccessRecord(authenticatedUser, record)) {
+      return res.status(403).json({ message: "You are not allowed to access this record." });
     }
 
     const filePath = resolveStoredFilePath(record);
@@ -274,7 +385,16 @@ const previewRecord = async (req, res) => {
 
 const downloadRecord = async (req, res) => {
   try {
+    const authenticatedUser = await getAuthenticatedUser(req);
+    if (!authenticatedUser) {
+      return res.status(401).json({ message: "Invalid user session." });
+    }
+
     const fileKey = req.params.filename || req.params.recordId;
+
+    if (!isVaultEnabledForUser(authenticatedUser)) {
+      return res.status(403).json({ message: "Vault access is disabled for this user." });
+    }
 
     if (!fileKey) {
       return res.status(400).json({ message: "Invalid filename." });
@@ -283,6 +403,10 @@ const downloadRecord = async (req, res) => {
     const record = await findRecordByFileKey(fileKey);
     if (!record) {
       return res.status(404).json({ message: "Record not found." });
+    }
+
+    if (!canAccessRecord(authenticatedUser, record)) {
+      return res.status(403).json({ message: "You are not allowed to access this record." });
     }
 
     const filePath = resolveStoredFilePath(record);
@@ -294,6 +418,82 @@ const downloadRecord = async (req, res) => {
     return res.download(filePath, safeFileName);
   } catch (error) {
     return res.status(500).json({ message: "Could not download record file.", error: error.message });
+  }
+};
+
+const updateRecord = async (req, res) => {
+  try {
+    const fileKey = req.params.filename || req.params.recordId;
+    const payload = req.body || {};
+    const hasTitle = Object.prototype.hasOwnProperty.call(payload, "title");
+    const hasDescription = Object.prototype.hasOwnProperty.call(payload, "description");
+    const { password } = payload;
+
+    if (!fileKey) {
+      return res.status(400).json({ message: "Invalid filename." });
+    }
+
+    if (!hasTitle && !hasDescription) {
+      return res.status(400).json({ message: "title or description is required for update." });
+    }
+
+    if (hasTitle && typeof payload.title !== "string") {
+      return res.status(400).json({ message: "title must be a string." });
+    }
+
+    if (hasDescription && typeof payload.description !== "string") {
+      return res.status(400).json({ message: "description must be a string." });
+    }
+
+    if (!password) {
+      return res.status(400).json({ message: "Password is required to edit a record." });
+    }
+
+    const authenticatedUser = await getAuthenticatedUser(req, true);
+    if (!authenticatedUser) {
+      return res.status(401).json({ message: "Invalid user session." });
+    }
+
+    if (!isVaultEnabledForUser(authenticatedUser)) {
+      return res.status(403).json({ message: "Vault access is disabled for this user." });
+    }
+
+    const record = await findRecordByFileKey(fileKey);
+    if (!record) {
+      return res.status(404).json({ message: "Record not found." });
+    }
+
+    if (!isRecordOwnedByUser(record, String(authenticatedUser._id))) {
+      return res.status(403).json({ message: "You are not allowed to edit this record." });
+    }
+
+    const isPasswordValid = await verifyPassword(authenticatedUser, password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: "Invalid password." });
+    }
+
+    if (hasTitle) {
+      const normalizedTitle = payload.title.trim();
+      if (!normalizedTitle) {
+        return res.status(400).json({ message: "title cannot be empty." });
+      }
+
+      record.title = normalizedTitle;
+    }
+
+    if (hasDescription) {
+      record.description = payload.description;
+    }
+
+    await record.save();
+
+    const authToken = req.authToken || getTokenFromRequest(req);
+    return res.status(200).json({
+      message: "Record updated successfully.",
+      record: buildRecordResponse(record, req, authToken)
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Could not update record.", error: error.message });
   }
 };
 
@@ -310,8 +510,13 @@ const deleteRecord = async (req, res) => {
       return res.status(400).json({ message: "Password is required to delete a record." });
     }
 
-    if (!req.user?.id || !mongoose.Types.ObjectId.isValid(req.user.id)) {
+    const authenticatedUser = await getAuthenticatedUser(req, true);
+    if (!authenticatedUser) {
       return res.status(401).json({ message: "Invalid user session." });
+    }
+
+    if (!isVaultEnabledForUser(authenticatedUser)) {
+      return res.status(403).json({ message: "Vault access is disabled for this user." });
     }
 
     const record = await findRecordByFileKey(fileKey);
@@ -319,16 +524,11 @@ const deleteRecord = async (req, res) => {
       return res.status(404).json({ message: "Record not found." });
     }
 
-    if (!isRecordOwnedByUser(record, req.user.id)) {
+    if (!isRecordOwnedByUser(record, String(authenticatedUser._id))) {
       return res.status(403).json({ message: "You are not allowed to delete this record." });
     }
 
-    const user = await User.findById(req.user.id).select("+password");
-    if (!user || !user.password) {
-      return res.status(401).json({ message: "User not found." });
-    }
-
-    const isPasswordValid = await bcrypt.compare(password, user.password);
+    const isPasswordValid = await verifyPassword(authenticatedUser, password);
     if (!isPasswordValid) {
       return res.status(401).json({ message: "Invalid password." });
     }
@@ -356,5 +556,6 @@ module.exports = {
   getVaultStatus,
   previewRecord,
   downloadRecord,
+  updateRecord,
   deleteRecord
 };

@@ -11,6 +11,7 @@ const {
   getVaultStatus,
   previewRecord,
   downloadRecord,
+  updateRecord,
   deleteRecord
 } = require("../controllers/recordController");
 
@@ -36,6 +37,7 @@ const upload = multer({ storage });
 router.post("/upload", protect, upload.single("file"), uploadRecord);
 router.get("/file/:filename/preview", protect, previewRecord);
 router.get("/file/:filename/download", protect, downloadRecord);
+router.patch("/file/:filename", protect, updateRecord);
 router.delete("/file/:filename", protect, deleteRecord);
 router.get("/vault-status", protect, getVaultStatus);
 router.get("/:patientId/recent", protect, getRecentRecords);
