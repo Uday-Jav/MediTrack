@@ -24,6 +24,18 @@ const recordSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  fileName: {
+    type: String,
+    default: ""
+  },
+  mimeType: {
+    type: String,
+    default: "application/octet-stream"
+  },
+  fileSize: {
+    type: Number,
+    default: 0
+  },
   createdAt: {
     type: Date,
     default: Date.now
