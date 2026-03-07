@@ -76,7 +76,7 @@ const buildRecordResponse = (record, req, authToken = "") => {
     ...raw,
     id: recordId,
     recordId,
-    fileUrl: raw.fileUrl ? `${baseUrl}${raw.fileUrl}` : "",
+    fileUrl: previewUrl,
     previewUrl,
     downloadUrl
   };
