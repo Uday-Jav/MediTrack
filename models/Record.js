@@ -32,6 +32,10 @@ const recordSchema = new mongoose.Schema({
     type: String,
     default: "application/octet-stream"
   },
+  fileData: {
+    type: Buffer,
+    select: false
+  },
   fileSize: {
     type: Number,
     default: 0

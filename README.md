@@ -68,6 +68,7 @@ node server.js
 - `GET /api/records/:patientId` (Protected)
 
 Files are not publicly served from `/uploads`; use the protected preview/download APIs.
+Uploaded files are also stored in MongoDB (`records.fileData`) so preview/download can still work after stateless redeploys.
 
 ## Recommended Indexes
 

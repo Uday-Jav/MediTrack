@@ -100,6 +100,8 @@ const extractFileKey = (value) => {
 
 const buildRecordResponse = (record, req, authToken = "") => {
   const raw = record.toObject ? record.toObject() : record;
+  const sanitizedRecord = { ...raw };
+  delete sanitizedRecord.fileData;
   const recordId = raw._id.toString();
   const baseUrl = getBaseUrl(req);
   const fileKey = extractFileKey(raw.fileUrl) || recordId;
@@ -114,7 +116,7 @@ const buildRecordResponse = (record, req, authToken = "") => {
   );
 
   return {
-    ...raw,
+    ...sanitizedRecord,
     id: recordId,
     recordId,
     fileUrl: previewUrl,
@@ -151,7 +153,15 @@ const resolveStoredFilePath = (record) => {
   return "";
 };
 
-const findRecordByFileKey = async (fileKey) => {
+const applyFileDataSelection = (query, includeFileData) => {
+  if (includeFileData) {
+    return query.select("+fileData");
+  }
+
+  return query;
+};
+
+const findRecordByFileKey = async (fileKey, includeFileData = false) => {
   const normalizedKey = extractFileKey(fileKey);
 
   if (!normalizedKey) {
@@ -159,7 +169,7 @@ const findRecordByFileKey = async (fileKey) => {
   }
 
   if (mongoose.Types.ObjectId.isValid(normalizedKey)) {
-    const recordById = await Record.findById(normalizedKey);
+    const recordById = await applyFileDataSelection(Record.findById(normalizedKey), includeFileData);
     if (recordById) {
       return recordById;
     }
@@ -170,16 +180,18 @@ const findRecordByFileKey = async (fileKey) => {
     return null;
   }
 
-  const directMatch = await Record.findOne({
+  const directMatchQuery = Record.findOne({
     $or: [{ fileUrl: `/uploads/${safeFileName}` }, { fileName: safeFileName }]
   }).sort({ createdAt: -1 });
+  const directMatchWithFields = await applyFileDataSelection(directMatchQuery, includeFileData);
 
-  if (directMatch) {
-    return directMatch;
+  if (directMatchWithFields) {
+    return directMatchWithFields;
   }
 
   const fileUrlPattern = new RegExp(`${escapeRegex(safeFileName)}(?:\\?.*)?$`, "i");
-  return Record.findOne({ fileUrl: fileUrlPattern }).sort({ createdAt: -1 });
+  const patternMatchQuery = Record.findOne({ fileUrl: fileUrlPattern }).sort({ createdAt: -1 });
+  return applyFileDataSelection(patternMatchQuery, includeFileData);
 };
 
 const isRecordOwnedByUser = (record, userId) => {
@@ -236,6 +248,18 @@ const verifyPassword = async (user, password) => {
   return bcrypt.compare(password, user.password);
 };
 
+const sendStoredBuffer = (res, record, dispositionType = "inline") => {
+  const binaryData = record?.fileData;
+  if (!Buffer.isBuffer(binaryData) || binaryData.length === 0) {
+    return false;
+  }
+
+  const safeFileName = (record.fileName || "record").replace(/"/g, "");
+  res.setHeader("Content-Type", record.mimeType || "application/octet-stream");
+  res.setHeader("Content-Disposition", `${dispositionType}; filename=\"${safeFileName}\"`);
+  return res.send(binaryData);
+};
+
 const uploadRecord = async (req, res) => {
   try {
     const authenticatedUser = await getAuthenticatedUser(req);
@@ -275,6 +299,15 @@ const uploadRecord = async (req, res) => {
       return res.status(400).json({ message: "A file is required." });
     }
 
+    let fileDataBuffer = null;
+    try {
+      if (req.file.path) {
+        fileDataBuffer = await fs.promises.readFile(req.file.path);
+      }
+    } catch (fileReadError) {
+      fileDataBuffer = null;
+    }
+
     const record = await Record.create({
       patientId,
       userId: patientId,
@@ -283,6 +316,7 @@ const uploadRecord = async (req, res) => {
       fileUrl: `/uploads/${req.file.filename}`,
       fileName: req.file.originalname || req.file.filename,
       mimeType: req.file.mimetype || "application/octet-stream",
+      fileData: fileDataBuffer || undefined,
       fileSize: Number(req.file.size) || 0
     });
 
@@ -437,7 +471,7 @@ const previewRecord = async (req, res) => {
       return res.status(400).json({ message: "Invalid filename." });
     }
 
-    const record = await findRecordByFileKey(fileKey);
+    const record = await findRecordByFileKey(fileKey, true);
     if (!record) {
       return res.status(404).json({ message: "Record not found." });
     }
@@ -447,14 +481,19 @@ const previewRecord = async (req, res) => {
     }
 
     const filePath = resolveStoredFilePath(record);
-    if (!isStoredFilePathUsable(filePath)) {
-      return res.status(404).json({ message: "Stored file not found." });
+    if (isStoredFilePathUsable(filePath)) {
+      const safeFileName = (record.fileName || path.basename(filePath)).replace(/"/g, "");
+      res.setHeader("Content-Type", record.mimeType || "application/octet-stream");
+      res.setHeader("Content-Disposition", `inline; filename=\"${safeFileName}\"`);
+      return res.sendFile(filePath);
     }
 
-    const safeFileName = (record.fileName || path.basename(filePath)).replace(/"/g, "");
-    res.setHeader("Content-Type", record.mimeType || "application/octet-stream");
-    res.setHeader("Content-Disposition", `inline; filename=\"${safeFileName}\"`);
-    return res.sendFile(filePath);
+    const sentFromDb = sendStoredBuffer(res, record, "inline");
+    if (sentFromDb) {
+      return sentFromDb;
+    }
+
+    return res.status(404).json({ message: "Stored file not found." });
   } catch (error) {
     return res.status(500).json({ message: "Could not preview record file.", error: error.message });
   }
@@ -477,7 +516,7 @@ const downloadRecord = async (req, res) => {
       return res.status(400).json({ message: "Invalid filename." });
     }
 
-    const record = await findRecordByFileKey(fileKey);
+    const record = await findRecordByFileKey(fileKey, true);
     if (!record) {
       return res.status(404).json({ message: "Record not found." });
     }
@@ -487,12 +526,17 @@ const downloadRecord = async (req, res) => {
     }
 
     const filePath = resolveStoredFilePath(record);
-    if (!isStoredFilePathUsable(filePath)) {
-      return res.status(404).json({ message: "Stored file not found." });
+    if (isStoredFilePathUsable(filePath)) {
+      const safeFileName = (record.fileName || path.basename(filePath)).replace(/"/g, "");
+      return res.download(filePath, safeFileName);
     }
 
-    const safeFileName = (record.fileName || path.basename(filePath)).replace(/"/g, "");
-    return res.download(filePath, safeFileName);
+    const sentFromDb = sendStoredBuffer(res, record, "attachment");
+    if (sentFromDb) {
+      return sentFromDb;
+    }
+
+    return res.status(404).json({ message: "Stored file not found." });
   } catch (error) {
     return res.status(500).json({ message: "Could not download record file.", error: error.message });
   }
