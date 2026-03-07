@@ -37,6 +37,7 @@ router.post("/upload", protect, upload.single("file"), uploadRecord);
 router.get("/file/:filename/preview", protect, previewRecord);
 router.get("/file/:filename/download", protect, downloadRecord);
 router.delete("/file/:filename", protect, deleteRecord);
+router.get("/vault-status", protect, getVaultStatus);
 router.get("/:patientId/recent", protect, getRecentRecords);
 router.get("/:patientId/vault-status", protect, getVaultStatus);
 router.get("/:patientId", protect, getRecordsByPatientId);

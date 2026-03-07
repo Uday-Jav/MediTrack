@@ -12,9 +12,40 @@ const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const getBaseUrl = (req) => `${req.protocol}://${req.get("host")}`;
 
-const buildPatientFilter = (patientId) => ({
-  $or: [{ patientId }, { userId: patientId }]
-});
+const normalizeIdValue = (value) => {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized || normalized === "undefined" || normalized === "null" || normalized === "me") {
+    return "";
+  }
+
+  return normalized;
+};
+
+const resolvePatientIdForRequest = (req) => {
+  const routePatientId = normalizeIdValue(req.params?.patientId);
+  const authPatientId = normalizeIdValue(req.user?.id);
+
+  if (routePatientId && mongoose.Types.ObjectId.isValid(routePatientId)) {
+    return routePatientId;
+  }
+
+  if (authPatientId && mongoose.Types.ObjectId.isValid(authPatientId)) {
+    return authPatientId;
+  }
+
+  return routePatientId || authPatientId;
+};
+
+const buildPatientFilter = (patientId) => {
+  const normalizedPatientId = String(patientId || "").trim();
+  const filters = [{ userId: normalizedPatientId }];
+
+  if (mongoose.Types.ObjectId.isValid(normalizedPatientId)) {
+    filters.push({ patientId: new mongoose.Types.ObjectId(normalizedPatientId) });
+  }
+
+  return { $or: filters };
+};
 
 const withTokenQuery = (url, token) => {
   if (!token) {
@@ -89,11 +120,18 @@ const isRecordOwnedByUser = (record, userId) => {
 
 const uploadRecord = async (req, res) => {
   try {
-    const { patientId, title, description } = req.body;
+    const authPatientId = normalizeIdValue(req.user?.id);
+    const bodyPatientId = normalizeIdValue(req.body?.patientId);
+    const patientId = req.user?.role === "doctor" ? bodyPatientId || authPatientId : authPatientId || bodyPatientId;
+    const { title, description } = req.body;
     const authToken = req.authToken || getTokenFromRequest(req);
 
-    if (!patientId || !title) {
-      return res.status(400).json({ message: "patientId and title are required." });
+    if (!title) {
+      return res.status(400).json({ message: "title is required." });
+    }
+
+    if (!patientId) {
+      return res.status(400).json({ message: "patientId is required." });
     }
 
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
@@ -126,7 +164,7 @@ const uploadRecord = async (req, res) => {
 
 const getRecordsByPatientId = async (req, res) => {
   try {
-    const { patientId } = req.params;
+    const patientId = resolvePatientIdForRequest(req);
     const search = (req.query.search || req.query.q || "").trim();
     const authToken = req.authToken || getTokenFromRequest(req);
 
@@ -154,7 +192,7 @@ const getRecordsByPatientId = async (req, res) => {
 
 const getRecentRecords = async (req, res) => {
   try {
-    const { patientId } = req.params;
+    const patientId = resolvePatientIdForRequest(req);
     const authToken = req.authToken || getTokenFromRequest(req);
 
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
@@ -180,7 +218,7 @@ const getRecentRecords = async (req, res) => {
 
 const getVaultStatus = async (req, res) => {
   try {
-    const { patientId } = req.params;
+    const patientId = resolvePatientIdForRequest(req);
 
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
       return res.status(400).json({ message: "Invalid patientId." });
