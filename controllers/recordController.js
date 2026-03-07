@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const mongoose = require("mongoose");
 const Record = require("../models/Record");
+const { getTokenFromRequest } = require("../middleware/authMiddleware");
 
 const uploadsDir = path.join(__dirname, "..", "uploads");
 
@@ -13,18 +14,29 @@ const buildPatientFilter = (patientId) => ({
   $or: [{ patientId }, { userId: patientId }]
 });
 
-const buildRecordResponse = (record, req) => {
+const withTokenQuery = (url, token) => {
+  if (!token) {
+    return url;
+  }
+
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}token=${encodeURIComponent(token)}`;
+};
+
+const buildRecordResponse = (record, req, authToken = "") => {
   const raw = record.toObject ? record.toObject() : record;
   const recordId = raw._id.toString();
   const baseUrl = getBaseUrl(req);
+  const previewUrl = withTokenQuery(`${baseUrl}/api/records/file/${recordId}/preview`, authToken);
+  const downloadUrl = withTokenQuery(`${baseUrl}/api/records/file/${recordId}/download`, authToken);
 
   return {
     ...raw,
     id: recordId,
     recordId,
     fileUrl: raw.fileUrl ? `${baseUrl}${raw.fileUrl}` : "",
-    previewUrl: `${baseUrl}/api/records/file/${recordId}/preview`,
-    downloadUrl: `${baseUrl}/api/records/file/${recordId}/download`
+    previewUrl,
+    downloadUrl
   };
 };
 
@@ -33,6 +45,7 @@ const resolveStoredFilePath = (record) => path.join(uploadsDir, path.basename(re
 const uploadRecord = async (req, res) => {
   try {
     const { patientId, title, description } = req.body;
+    const authToken = req.authToken || getTokenFromRequest(req);
 
     if (!patientId || !title) {
       return res.status(400).json({ message: "patientId and title are required." });
@@ -59,7 +72,7 @@ const uploadRecord = async (req, res) => {
 
     return res.status(201).json({
       message: "Medical record uploaded successfully.",
-      record: buildRecordResponse(record, req)
+      record: buildRecordResponse(record, req, authToken)
     });
   } catch (error) {
     return res.status(500).json({ message: "Record upload failed.", error: error.message });
@@ -70,6 +83,7 @@ const getRecordsByPatientId = async (req, res) => {
   try {
     const { patientId } = req.params;
     const search = (req.query.search || req.query.q || "").trim();
+    const authToken = req.authToken || getTokenFromRequest(req);
 
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
       return res.status(400).json({ message: "Invalid patientId." });
@@ -86,7 +100,7 @@ const getRecordsByPatientId = async (req, res) => {
     return res.status(200).json({
       message: "Medical history fetched successfully.",
       count: records.length,
-      records: records.map((record) => buildRecordResponse(record, req))
+      records: records.map((record) => buildRecordResponse(record, req, authToken))
     });
   } catch (error) {
     return res.status(500).json({ message: "Could not fetch records.", error: error.message });
@@ -96,6 +110,7 @@ const getRecordsByPatientId = async (req, res) => {
 const getRecentRecords = async (req, res) => {
   try {
     const { patientId } = req.params;
+    const authToken = req.authToken || getTokenFromRequest(req);
 
     if (!mongoose.Types.ObjectId.isValid(patientId)) {
       return res.status(400).json({ message: "Invalid patientId." });
@@ -111,7 +126,7 @@ const getRecentRecords = async (req, res) => {
     return res.status(200).json({
       message: "Recent medical records fetched successfully.",
       count: records.length,
-      records: records.map((record) => buildRecordResponse(record, req))
+      records: records.map((record) => buildRecordResponse(record, req, authToken))
     });
   } catch (error) {
     return res.status(500).json({ message: "Could not fetch recent records.", error: error.message });
