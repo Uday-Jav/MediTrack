@@ -40,8 +40,10 @@ router.get("/file/:filename/download", protect, downloadRecord);
 router.patch("/file/:filename", protect, updateRecord);
 router.delete("/file/:filename", protect, deleteRecord);
 router.get("/vault-status", protect, getVaultStatus);
+router.get("/storage-status", protect, getVaultStatus);
 router.get("/:patientId/recent", protect, getRecentRecords);
 router.get("/:patientId/vault-status", protect, getVaultStatus);
+router.get("/:patientId/storage-status", protect, getVaultStatus);
 router.get("/:patientId", protect, getRecordsByPatientId);
 
 module.exports = router;

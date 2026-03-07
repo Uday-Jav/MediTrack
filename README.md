@@ -62,6 +62,7 @@ node server.js
 - `POST /api/records/upload` (Protected, `multipart/form-data`: `patientId`, `title`, `description`, `file`)
 - `GET /api/records/file/:filename/preview` (Protected)
 - `GET /api/records/file/:filename/download` (Protected)
+- `GET /api/records/vault-status` (Protected, also available as `/api/records/storage-status`)
 - `PATCH /api/records/file/:filename` (Protected, body: `password`, `title` and/or `description`)
 - `DELETE /api/records/file/:filename` (Protected, body: `password`)
 - `GET /api/records/:patientId` (Protected)

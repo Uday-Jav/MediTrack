@@ -56,12 +56,53 @@ const withTokenQuery = (url, token) => {
   return `${url}${separator}token=${encodeURIComponent(token)}`;
 };
 
+const safeDecodeURIComponent = (value) => {
+  try {
+    return decodeURIComponent(String(value || ""));
+  } catch (error) {
+    return String(value || "");
+  }
+};
+
+const extractFileKey = (value) => {
+  const rawValue = safeDecodeURIComponent(value).trim();
+  if (!rawValue) {
+    return "";
+  }
+
+  const parseCandidatePath = (inputPath) => {
+    const normalizedPath = String(inputPath || "").replace(/\\/g, "/");
+    const withoutQueryAndHash = normalizedPath.split("?")[0].split("#")[0];
+    const apiMatch = withoutQueryAndHash.match(/\/api\/records\/file\/([^/]+)\/(?:preview|download)$/i);
+    if (apiMatch && apiMatch[1]) {
+      return safeDecodeURIComponent(apiMatch[1]);
+    }
+
+    const uploadMatch = withoutQueryAndHash.match(/\/uploads\/([^/]+)$/i);
+    if (uploadMatch && uploadMatch[1]) {
+      return safeDecodeURIComponent(uploadMatch[1]);
+    }
+
+    return path.basename(withoutQueryAndHash);
+  };
+
+  if (/^https?:\/\//i.test(rawValue)) {
+    try {
+      const parsedUrl = new URL(rawValue);
+      return parseCandidatePath(parsedUrl.pathname);
+    } catch (error) {
+      return parseCandidatePath(rawValue);
+    }
+  }
+
+  return parseCandidatePath(rawValue);
+};
+
 const buildRecordResponse = (record, req, authToken = "") => {
   const raw = record.toObject ? record.toObject() : record;
   const recordId = raw._id.toString();
   const baseUrl = getBaseUrl(req);
-  const storedFileName = path.basename(raw.fileUrl || "");
-  const fileKey = storedFileName || recordId;
+  const fileKey = extractFileKey(raw.fileUrl) || recordId;
   const encodedFileKey = encodeURIComponent(fileKey);
   const previewUrl = withTokenQuery(
     `${baseUrl}/api/records/file/${encodedFileKey}/preview`,
@@ -82,10 +123,36 @@ const buildRecordResponse = (record, req, authToken = "") => {
   };
 };
 
-const resolveStoredFilePath = (record) => path.join(uploadsDir, path.basename(record.fileUrl || ""));
+const isStoredFilePathUsable = (candidatePath) => {
+  if (!candidatePath) {
+    return false;
+  }
+
+  try {
+    return fs.existsSync(candidatePath) && fs.statSync(candidatePath).isFile();
+  } catch (error) {
+    return false;
+  }
+};
+
+const resolveStoredFilePath = (record) => {
+  const fileUrlKey = extractFileKey(record?.fileUrl);
+  const originalNameKey = extractFileKey(record?.fileName);
+  const candidates = [fileUrlKey, originalNameKey]
+    .filter(Boolean)
+    .map((key) => path.join(uploadsDir, path.basename(key)));
+
+  for (const candidatePath of candidates) {
+    if (isStoredFilePathUsable(candidatePath)) {
+      return candidatePath;
+    }
+  }
+
+  return "";
+};
 
 const findRecordByFileKey = async (fileKey) => {
-  const normalizedKey = decodeURIComponent(String(fileKey || "")).trim();
+  const normalizedKey = extractFileKey(fileKey);
 
   if (!normalizedKey) {
     return null;
@@ -103,9 +170,16 @@ const findRecordByFileKey = async (fileKey) => {
     return null;
   }
 
-  return Record.findOne({
+  const directMatch = await Record.findOne({
     $or: [{ fileUrl: `/uploads/${safeFileName}` }, { fileName: safeFileName }]
   }).sort({ createdAt: -1 });
+
+  if (directMatch) {
+    return directMatch;
+  }
+
+  const fileUrlPattern = new RegExp(`${escapeRegex(safeFileName)}(?:\\?.*)?$`, "i");
+  return Record.findOne({ fileUrl: fileUrlPattern }).sort({ createdAt: -1 });
 };
 
 const isRecordOwnedByUser = (record, userId) => {
@@ -330,13 +404,16 @@ const getVaultStatus = async (req, res) => {
     const totalFileSize = records.reduce((sum, record) => sum + (record.fileSize || 0), 0);
     const lastAddedAt = totalRecords > 0 ? records[0].createdAt : null;
 
+    const vaultStatus = {
+      totalRecords,
+      totalFileSize,
+      lastAddedAt
+    };
+
     return res.status(200).json({
       message: "Vault status fetched successfully.",
-      status: {
-        totalRecords,
-        totalFileSize,
-        lastAddedAt
-      }
+      status: vaultStatus,
+      storage: vaultStatus
     });
   } catch (error) {
     return res.status(500).json({ message: "Could not fetch vault status.", error: error.message });
@@ -370,7 +447,7 @@ const previewRecord = async (req, res) => {
     }
 
     const filePath = resolveStoredFilePath(record);
-    if (!fs.existsSync(filePath)) {
+    if (!isStoredFilePathUsable(filePath)) {
       return res.status(404).json({ message: "Stored file not found." });
     }
 
@@ -410,7 +487,7 @@ const downloadRecord = async (req, res) => {
     }
 
     const filePath = resolveStoredFilePath(record);
-    if (!fs.existsSync(filePath)) {
+    if (!isStoredFilePathUsable(filePath)) {
       return res.status(404).json({ message: "Stored file not found." });
     }
 
@@ -536,7 +613,7 @@ const deleteRecord = async (req, res) => {
     const filePath = resolveStoredFilePath(record);
     await Record.deleteOne({ _id: record._id });
 
-    if (fs.existsSync(filePath)) {
+    if (isStoredFilePathUsable(filePath)) {
       await fs.promises.unlink(filePath);
     }
 
