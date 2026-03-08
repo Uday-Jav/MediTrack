@@ -53,6 +53,11 @@ Copy `.env.example` to `.env` and set:
 - PostgreSQL credentials (`DATABASE_URL` or `POSTGRES_*`)
 - `CORS_ORIGIN`
 
+Optional local fallback flags:
+
+- `POSTGRES_FALLBACK_MEMORY=true` to run with in-memory PostgreSQL emulation if real PostgreSQL is unavailable
+- `MOCK_OPENAI_RESPONSE=true` to return deterministic mock medical guidance when `OPENAI_API_KEY` is not set
+
 Mongo env vars are optional unless you also use legacy `/api/auth` and `/api/records` endpoints.
 
 ## Database Setup

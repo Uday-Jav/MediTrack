@@ -10,6 +10,11 @@ const DEFAULT_FALLBACK_RESPONSE =
 
 let openAiClient = null;
 
+const isMockAiEnabled = () =>
+  String(process.env.MOCK_OPENAI_RESPONSE || "")
+    .trim()
+    .toLowerCase() === "true";
+
 const getOpenAiClient = () => {
   if (!process.env.OPENAI_API_KEY) {
     const error = new Error("OPENAI_API_KEY is not configured.");
@@ -122,6 +127,52 @@ const extractMessageText = (content) => {
     .join("");
 };
 
+const buildMockMedicalResponse = ({ userMessage, patientHistory }) => {
+  const lowerMessage = String(userMessage || "").toLowerCase();
+  const allergyLine =
+    patientHistory
+      .split("\n")
+      .find((line) => line.toLowerCase().startsWith("allergies:")) || "Allergies: None reported";
+
+  const possibleConditions = [];
+  if (lowerMessage.includes("fever") || lowerMessage.includes("cold")) {
+    possibleConditions.push("Viral upper respiratory infection");
+  }
+  if (lowerMessage.includes("throat") || lowerMessage.includes("cough")) {
+    possibleConditions.push("Pharyngitis or mild throat irritation");
+  }
+  if (lowerMessage.includes("stomach") || lowerMessage.includes("acidity")) {
+    possibleConditions.push("Mild gastritis or acid reflux");
+  }
+  if (possibleConditions.length === 0) {
+    possibleConditions.push("Non-specific minor illness requiring symptom monitoring");
+  }
+
+  return `### Possible minor illnesses
+- ${possibleConditions.join("\n- ")}
+
+### Reasoning
+- Based on your symptom message: "${userMessage}".
+- Prior history considered from medical record.
+- ${allergyLine}
+
+### Safe home-care advice
+- Stay hydrated and rest.
+- Use light meals and avoid irritants (smoke, spicy foods) depending on symptoms.
+- Monitor temperature and symptom severity every 6-8 hours.
+
+### OTC options (if suitable for you)
+- Paracetamol/acetaminophen for fever or mild pain.
+- Saline gargle and throat lozenges for sore throat.
+- Antacid for mild acidity.
+- Avoid any medicine linked to known allergies.
+
+### When to visit a doctor
+- If symptoms persist beyond 2-3 days without improvement.
+- If high fever, breathing difficulty, chest pain, confusion, severe vomiting, dehydration, or worsening pain occurs.
+- Seek urgent care immediately for red-flag symptoms.`;
+};
+
 const fetchPatientRecord = async (userId) => {
   const result = await query(
     `SELECT patient_id, name, age, gender, allergies, conditions, medications, recent_symptoms, last_visit, created_at
@@ -187,10 +238,13 @@ const runStreamingCompletion = async ({
   userId,
   conversationId,
   languageCode,
-  aiMessages
+  aiMessages,
+  userMessage,
+  patientHistory
 }) => {
-  const openai = getOpenAiClient();
-  const model = getModelName();
+  const useMockResponse = !process.env.OPENAI_API_KEY && isMockAiEnabled();
+  const openai = useMockResponse ? null : getOpenAiClient();
+  const model = useMockResponse ? null : getModelName();
   const abortController = new AbortController();
   let responseText = "";
 
@@ -204,6 +258,38 @@ const runStreamingCompletion = async ({
   res.flushHeaders?.();
 
   sendSseEvent(res, { type: "ready", conversationId });
+
+  if (useMockResponse) {
+    const mockResponse = ensureDisclaimer(
+      buildMockMedicalResponse({
+        userMessage,
+        patientHistory
+      })
+    );
+
+    const chunks = mockResponse.match(/.{1,80}/g) || [mockResponse];
+    for (const chunk of chunks) {
+      responseText += chunk;
+      sendSseEvent(res, { type: "chunk", content: chunk });
+    }
+
+    await saveChatMessage({
+      conversationId,
+      userId,
+      role: "assistant",
+      content: mockResponse,
+      language: languageCode
+    });
+
+    sendSseEvent(res, {
+      type: "done",
+      conversationId,
+      reply: mockResponse
+    });
+
+    res.end();
+    return;
+  }
 
   try {
     const stream = await openai.chat.completions.create({
@@ -288,20 +374,33 @@ const handleChatRequest = async (req, res, next) => {
         userId,
         conversationId,
         languageCode,
-        aiMessages
+        aiMessages,
+        userMessage: payload.message,
+        patientHistory
       });
       return;
     }
 
-    const openai = getOpenAiClient();
-    const completion = await openai.chat.completions.create({
-      model: getModelName(),
-      messages: aiMessages,
-      temperature: 0.2
-    });
+    let responseText = "";
 
-    const rawContent = completion.choices?.[0]?.message?.content;
-    const responseText = ensureDisclaimer(extractMessageText(rawContent));
+    if (!process.env.OPENAI_API_KEY && isMockAiEnabled()) {
+      responseText = ensureDisclaimer(
+        buildMockMedicalResponse({
+          userMessage: payload.message,
+          patientHistory
+        })
+      );
+    } else {
+      const openai = getOpenAiClient();
+      const completion = await openai.chat.completions.create({
+        model: getModelName(),
+        messages: aiMessages,
+        temperature: 0.2
+      });
+
+      const rawContent = completion.choices?.[0]?.message?.content;
+      responseText = ensureDisclaimer(extractMessageText(rawContent));
+    }
 
     await saveChatMessage({
       conversationId,
