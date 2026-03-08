@@ -3,14 +3,37 @@ const path = require("path");
 const { Pool } = require("pg");
 
 const parseBoolean = (value) => String(value || "").trim().toLowerCase() === "true";
+const hasBooleanEnv = (value) => ["true", "false"].includes(String(value || "").trim().toLowerCase());
+
+const shouldUseSslFromConnectionString = (connectionString) => {
+  try {
+    const parsed = new URL(connectionString);
+    const sslmode = String(parsed.searchParams.get("sslmode") || "").toLowerCase();
+    const ssl = String(parsed.searchParams.get("ssl") || "").toLowerCase();
+
+    if (["require", "verify-ca", "verify-full"].includes(sslmode)) {
+      return true;
+    }
+
+    return ["1", "true", "yes"].includes(ssl);
+  } catch (error) {
+    return false;
+  }
+};
 
 let activePool = null;
 let usingInMemoryDb = false;
 
 const buildPoolConfig = () => {
   const connectionString = process.env.DATABASE_URL;
-  const sslEnabled = parseBoolean(process.env.POSTGRES_SSL);
-  const fallbackPassword = String(process.env.POSTGRES_PASSWORD ?? "postgres");
+  const envHasSslToggle = hasBooleanEnv(process.env.POSTGRES_SSL);
+  const sslEnabled = envHasSslToggle
+    ? parseBoolean(process.env.POSTGRES_SSL)
+    : connectionString
+      ? shouldUseSslFromConnectionString(connectionString)
+      : false;
+  const rejectUnauthorized = parseBoolean(process.env.POSTGRES_SSL_REJECT_UNAUTHORIZED);
+  const localPassword = String(process.env.POSTGRES_PASSWORD ?? "");
   const sharedConfig = {
     max: Number(process.env.POSTGRES_POOL_MAX || 10),
     idleTimeoutMillis: Number(process.env.POSTGRES_IDLE_TIMEOUT_MS || 30000),
@@ -21,8 +44,8 @@ const buildPoolConfig = () => {
     return {
       ...sharedConfig,
       connectionString,
-      password: fallbackPassword,
-      ssl: sslEnabled ? { rejectUnauthorized: false } : undefined
+      // Do not override password when DATABASE_URL is provided; URL credentials should be authoritative.
+      ssl: sslEnabled ? { rejectUnauthorized } : undefined
     };
   }
 
@@ -32,8 +55,8 @@ const buildPoolConfig = () => {
     port: Number(process.env.POSTGRES_PORT || 5432),
     database: process.env.POSTGRES_DB || "medivault",
     user: process.env.POSTGRES_USER || "postgres",
-    password: fallbackPassword,
-    ssl: sslEnabled ? { rejectUnauthorized: false } : undefined
+    password: localPassword,
+    ssl: sslEnabled ? { rejectUnauthorized } : undefined
   };
 };
 
