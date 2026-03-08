@@ -1,81 +1,141 @@
-# MediVault - Backend
+# MediVault Backend
 
-Express backend for **MediVault - Digital Medical History Platform** using MongoDB Atlas and Mongoose.
+Production-ready Express backend for:
 
-## Tech Stack
+- AI medical assistant chat (`/api/chat`)
+- Page/chat translation (`/api/translate`)
+- Existing auth + record routes (`/api/auth`, `/api/records`)
 
-- Node.js
-- Express.js
-- MongoDB Atlas + Mongoose
-- JWT authentication
-- Multer file uploads
-- bcrypt password hashing
-- dotenv
-- CORS
+## Stack
+
+- Node.js + Express
+- PostgreSQL (`patient_records`, `chat_history`)
+- OpenAI API (medical assistant responses)
+- Open translation library (`@vitalets/google-translate-api`)
+- Security middleware: Helmet, CORS allowlist, rate limiting, input validation
 
 ## Project Structure
 
 ```text
 backend/
-|- server.js
-|- config/
-|  |- db.js
-|- models/
-|  |- User.js
-|  |- Record.js
-|- routes/
-|  |- authRoutes.js
-|  |- recordRoutes.js
-|- controllers/
-|  |- authController.js
-|  |- recordController.js
-|- middleware/
-|  |- authMiddleware.js
-|- uploads/
-|- .env
+  controllers/
+    chatController.js
+    translationController.js
+    authController.js
+    recordController.js
+  db/
+    postgres.js
+    schema.sql
+  middleware/
+    errorHandler.js
+    rateLimiters.js
+    validation.js
+    authMiddleware.js
+  routes/
+    chat.js
+    translation.js
+    authRoutes.js
+    recordRoutes.js
+  services/
+    translationService.js
+  validators/
+    chatSchemas.js
+    translationSchemas.js
+  server.js
+  .env.example
 ```
 
-## Environment Variables
+## Environment
 
-Set `.env`:
+Copy `.env.example` to `.env` and set:
 
-```env
-PORT=5000
-JWT_SECRET=your_secret_key
-MONGODB_URI=mongodb+srv://medivaultUser:<PASSWORD>@medivault-cluster.1vmjzrr.mongodb.net/?appName=medivault-cluster
-MONGODB_DB_NAME=medivault
+- `OPENAI_API_KEY`
+- PostgreSQL credentials (`DATABASE_URL` or `POSTGRES_*`)
+- `CORS_ORIGIN`
+
+Mongo env vars are optional unless you also use legacy `/api/auth` and `/api/records` endpoints.
+
+## Database Setup
+
+Run schema:
+
+```bash
+psql "$DATABASE_URL" -f db/schema.sql
 ```
 
-`config/db.js` also accepts `MONGO_URI` and `MONGO_DB_NAME` if you prefer those names.
+If you do not use `DATABASE_URL`:
 
-## Install and Run
+```bash
+psql -h localhost -U postgres -d medivault -f db/schema.sql
+
+# Optional sample patient row
+psql "$DATABASE_URL" -f db/seed.sql
+```
+
+## Run
 
 ```bash
 npm install
-node server.js
+npm run dev
 ```
 
-## API Endpoints
+## Core API
 
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `POST /api/records/upload` (Protected, `multipart/form-data`: `patientId`, `title`, `description`, `file`)
-- `GET /api/records/file/:filename/preview` (Protected)
-- `GET /api/records/file/:filename/download` (Protected)
-- `GET /api/records/vault-status` (Protected, also available as `/api/records/storage-status`)
-- `PATCH /api/records/file/:filename` (Protected, body: `password`, `title` and/or `description`)
-- `DELETE /api/records/file/:filename` (Protected, body: `password`)
-- `GET /api/records/:patientId` (Protected)
+### `POST /api/chat`
 
-Files are not publicly served from `/uploads`; use the protected preview/download APIs.
-Uploaded files are also stored in MongoDB (`records.fileData`) so preview/download can still work after stateless redeploys.
+Request body:
 
-## Recommended Indexes
-
-Run in Mongo shell for the `medivault` database:
-
-```javascript
-db.users.createIndex({ email: 1 }, { unique: true });
-db.records.createIndex({ patientId: 1 });
-db.records.createIndex({ userId: 1, createdAt: -1 });
+```json
+{
+  "userId": "patient_123",
+  "message": "I have sore throat and mild fever",
+  "language": "en",
+  "conversationId": "optional-existing-id",
+  "stream": false
+}
 ```
+
+Behavior:
+
+1. Fetch patient medical record from PostgreSQL
+2. Build medical-safe OpenAI prompt with history + symptom message
+3. Generate guidance with disclaimer
+4. Save chat history in `chat_history`
+
+If `stream: true`, the endpoint responds as `text/event-stream` and emits chunked updates.
+
+### `GET /api/chat/history/:userId`
+
+Query params:
+
+- `conversationId` (optional)
+- `limit` (optional, default 20, max 50)
+
+### `POST /api/translate`
+
+```json
+{
+  "text": "Hello world",
+  "targetLanguage": "hi",
+  "sourceLanguage": "auto"
+}
+```
+
+### `POST /api/translate/batch`
+
+```json
+{
+  "texts": ["Hello", "How are you?"],
+  "targetLanguage": "ta",
+  "sourceLanguage": "auto"
+}
+```
+
+## Supported Languages
+
+- `en` English
+- `hi` Hindi
+- `pa` Punjabi
+- `ta` Tamil
+- `bn` Bengali
+- `mr` Marathi

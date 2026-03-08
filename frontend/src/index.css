@@ -1,0 +1,102 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    /* Subtle unified background base */
+    @apply bg-slate-50 text-slate-800 font-sans antialiased min-h-screen transition-colors duration-300;
+    background-image: 
+      radial-gradient(at 0% 0%, hsla(253,16%,7%,0.02) 0, transparent 50%), 
+      radial-gradient(at 50% 0%, hsla(225,39%,30%,0.02) 0, transparent 50%), 
+      radial-gradient(at 100% 0%, hsla(253,16%,7%,0.02) 0, transparent 50%);
+  }
+}
+
+@layer components {
+  /* Rich glassmorphism for primary panels */
+  .glass-panel {
+    @apply bg-white/70 backdrop-blur-xl border border-white/40 shadow-premium rounded-3xl relative overflow-hidden;
+  }
+  
+  /* Input fields with modern focus rings */
+  .input-field {
+    @apply w-full px-4 py-3 rounded-2xl border border-slate-200/60 bg-white/50 text-slate-900 
+           focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500 focus:bg-white
+           transition duration-300 shadow-sm hover:border-slate-300 backdrop-blur-sm;
+  }
+
+  /* Text that cycles through gradient colors */
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-brand-500 via-accent-500 to-brand-500 bg-[length:200%_auto];
+    animation: gradient-x 15s ease infinite;
+  }
+
+  /* Vibrant button base */
+  .btn-primary {
+    @apply bg-gradient-to-r from-brand-500 to-accent-600 text-white font-medium rounded-2xl 
+           px-6 py-3 shadow-[0_4px_14px_0_rgba(20,184,166,0.39)] 
+           hover:shadow-[0_6px_20px_rgba(20,184,166,0.23)] hover:-translate-y-0.5
+           transition-all duration-300 active:translate-y-0 relative overflow-hidden;
+  }
+  
+  .btn-primary::after {
+    content: '';
+    @apply absolute inset-0 bg-white/20 opacity-0 transition-opacity duration-300;
+  }
+  
+  .btn-primary:hover::after {
+    @apply opacity-100;
+  }
+}
+
+/* Background animated mesh effect utility */
+.mesh-bg {
+  background-color: #f8fafc;
+  background-image: 
+    radial-gradient(at 40% 20%, hsla(172,98%,41%,0.15) 0px, transparent 50%),
+    radial-gradient(at 80% 0%, hsla(264,89%,68%,0.15) 0px, transparent 50%),
+    radial-gradient(at 0% 50%, hsla(199,89%,48%,0.15) 0px, transparent 50%);
+  @apply fixed inset-0 -z-10 pointer-events-none;
+}
+
+.dark body {
+  @apply bg-slate-950 text-slate-100;
+  background-image:
+    radial-gradient(at 0% 0%, rgba(20, 184, 166, 0.1) 0, transparent 50%),
+    radial-gradient(at 80% 0%, rgba(59, 130, 246, 0.1) 0, transparent 55%),
+    radial-gradient(at 0% 80%, rgba(14, 116, 144, 0.1) 0, transparent 55%);
+}
+
+.dark .glass-panel {
+  @apply bg-slate-900/70 border-slate-700/70 shadow-none;
+}
+
+.dark .input-field {
+  @apply bg-slate-900/70 border-slate-700 text-slate-100 focus:border-brand-400;
+}
+
+.dark .mesh-bg {
+  background-color: #020617;
+  background-image:
+    radial-gradient(at 35% 25%, rgba(20, 184, 166, 0.15) 0px, transparent 55%),
+    radial-gradient(at 80% 5%, rgba(59, 130, 246, 0.2) 0px, transparent 55%),
+    radial-gradient(at 0% 70%, rgba(14, 116, 144, 0.15) 0px, transparent 55%);
+}
+
+.dark .text-slate-900,
+.dark .text-slate-800 {
+  color: #f1f5f9 !important;
+}
+
+.dark .text-slate-700,
+.dark .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+.dark .text-slate-500,
+.dark .text-slate-400 {
+  color: #94a3b8 !important;
+}
