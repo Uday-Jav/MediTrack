@@ -9,6 +9,10 @@ const { getTokenFromRequest } = require("../middleware/authMiddleware");
 const uploadsDir = path.join(__dirname, "..", "uploads");
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const normalizeRecordType = (value) => {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized || "Document";
+};
 
 const getBaseUrl = (req) => `${req.protocol}://${req.get("host")}`;
 
@@ -275,7 +279,7 @@ const uploadRecord = async (req, res) => {
     const bodyPatientId = normalizeIdValue(req.body?.patientId);
     const patientId =
       authenticatedUser.role === "doctor" ? bodyPatientId || authPatientId : authPatientId;
-    const { title, description } = req.body;
+    const { title, description, type } = req.body;
     const authToken = req.authToken || getTokenFromRequest(req);
 
     if (authenticatedUser.role !== "doctor" && bodyPatientId && bodyPatientId !== authPatientId) {
@@ -312,6 +316,7 @@ const uploadRecord = async (req, res) => {
       patientId,
       userId: patientId,
       title: normalizedTitle,
+      type: normalizeRecordType(type),
       description: typeof description === "string" ? description : "",
       fileUrl: `/uploads/${req.file.filename}`,
       fileName: req.file.originalname || req.file.filename,

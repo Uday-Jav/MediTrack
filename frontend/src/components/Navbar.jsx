@@ -21,10 +21,10 @@ const Navbar = () => {
   if (isAuthPage) return null;
 
   return (
-    <div className="sticky top-4 z-50 px-4 pointer-events-none">
-      <nav className="glass-panel max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-2 pointer-events-auto shadow-premium transition-all duration-300">
-        <div className="flex justify-between items-center h-14">
-          <div className="flex items-center">
+    <div className="sticky top-3 sm:top-4 z-50 px-3 sm:px-4 pointer-events-none">
+      <nav className="glass-panel max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-3 pointer-events-auto transition-all duration-300">
+        <div className="flex min-h-[3.5rem] flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center shrink-0">
             <Link to="/" className="flex items-center gap-2.5 group">
             <div className="bg-gradient-to-br from-brand-400 to-brand-600 p-2 rounded-xl shadow-glow group-hover:scale-105 transition-transform duration-300">
               <Shield className="h-5 w-5 text-white" />
@@ -35,7 +35,7 @@ const Navbar = () => {
           </Link>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end">
             <LanguageSwitcher />
             <button
               type="button"
@@ -47,7 +47,7 @@ const Navbar = () => {
             </button>
 
           {isLoggedIn && (
-            <div className="flex items-center space-x-1 sm:space-x-2">
+            <div className="flex items-center space-x-1 sm:space-x-2 flex-wrap justify-end">
               <Link 
                 to="/dashboard" 
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-300 ${location.pathname === '/dashboard' ? 'text-brand-700 bg-brand-50 shadow-sm' : 'text-slate-600 hover:text-brand-600 hover:bg-slate-50'}`}

@@ -3,6 +3,27 @@ const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
+const buildUserPayload = (user) => ({
+  id: user._id,
+  userId: user.userId || user._id?.toString?.(),
+  name: user.name,
+  email: user.email,
+  vaultAccess: user.vaultAccess,
+  role: user.role
+});
+
+const buildAuthToken = (user) => {
+  if (!process.env.JWT_SECRET) {
+    return null;
+  }
+
+  return jwt.sign(
+    { id: user._id, role: user.role, email: user.email },
+    process.env.JWT_SECRET,
+    { expiresIn: "1d" }
+  );
+};
+
 const registerUser = async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
@@ -34,15 +55,12 @@ const registerUser = async (req, res) => {
       role: role || "patient"
     });
 
+    const token = buildAuthToken(user);
+
     return res.status(201).json({
       message: "User registered successfully.",
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        vaultAccess: user.vaultAccess,
-        role: user.role
-      }
+      token,
+      user: buildUserPayload(user)
     });
   } catch (error) {
     return res.status(500).json({ message: "Registration failed.", error: error.message });
@@ -68,26 +86,15 @@ const loginUser = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials." });
     }
 
-    if (!process.env.JWT_SECRET) {
+    const token = buildAuthToken(user);
+    if (!token) {
       return res.status(500).json({ message: "JWT_SECRET is not configured." });
     }
-
-    const token = jwt.sign(
-      { id: user._id, role: user.role, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: "1d" }
-    );
 
     return res.status(200).json({
       message: "Login successful.",
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        vaultAccess: user.vaultAccess,
-        role: user.role
-      }
+      user: buildUserPayload(user)
     });
   } catch (error) {
     return res.status(500).json({ message: "Login failed.", error: error.message });

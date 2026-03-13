@@ -16,8 +16,9 @@ const Register = () => {
 
     try {
       const response = await registerUser(formData);
-      if (response.token) {
-        localStorage.setItem('token', response.token);
+      const token = response.token || '';
+      if (token) {
+        localStorage.setItem('token', token);
       }
       if (response.user) {
         const userObj = response.user;
@@ -25,7 +26,7 @@ const Register = () => {
            userObj.vaultAccess = response.vaultAccess;
         }
         localStorage.setItem('user', JSON.stringify(userObj));
-        navigate('/dashboard');
+        navigate(token ? '/dashboard' : '/login');
       } else {
         navigate('/login');
       }

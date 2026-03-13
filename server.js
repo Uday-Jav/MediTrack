@@ -4,8 +4,9 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
+const mongoose = require("mongoose");
 const connectMongo = require("./config/db");
-const { ensurePostgresConnection } = require("./db/postgres");
+const { ensurePostgresConnection, closePostgresConnection } = require("./db/postgres");
 const { apiLimiter } = require("./middleware/rateLimiters");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const authRoutes = require("./routes/authRoutes");
@@ -14,6 +15,7 @@ const chatRoutes = require("./routes/chat");
 const translationRoutes = require("./routes/translation");
 
 const app = express();
+let activeServer = null;
 
 const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:5173")
   .split(",")
@@ -61,16 +63,77 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
-const startServer = async () => {
+const startServer = async ({ port = PORT } = {}) => {
+  if (activeServer) {
+    return activeServer;
+  }
+
   await ensurePostgresConnection();
   await connectMongo();
 
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port);
+
+    const cleanupListeners = () => {
+      server.off("error", handleError);
+      server.off("listening", handleListening);
+    };
+
+    const handleError = (error) => {
+      cleanupListeners();
+      reject(error);
+    };
+
+    const handleListening = () => {
+      cleanupListeners();
+      activeServer = server;
+      const resolvedPort = server.address()?.port || port;
+      console.log(`Server running on port ${resolvedPort}`);
+      resolve(server);
+    };
+
+    server.once("error", handleError);
+    server.once("listening", handleListening);
   });
 };
 
-startServer().catch((error) => {
-  console.error("Server startup failed:", error.message);
-  process.exit(1);
-});
+const stopServer = async () => {
+  const server = activeServer;
+  activeServer = null;
+
+  if (server) {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+  }
+
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.disconnect();
+  }
+
+  await closePostgresConnection();
+};
+
+if (require.main === module) {
+  startServer().catch((error) => {
+    const message =
+      error.code === "EADDRINUSE"
+        ? `Port ${PORT} is already in use.`
+        : error.message;
+    console.error("Server startup failed:", message);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  app,
+  startServer,
+  stopServer
+};

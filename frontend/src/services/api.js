@@ -1,9 +1,22 @@
 import axios from 'axios';
 
-const normalizeApiBaseUrl = (value) => {
-  const raw = String(value || 'http://localhost:5000/api').trim().replace(/\/+$/, '');
-  if (!raw) {
+const getDefaultApiBaseUrl = () => {
+  if (typeof window === 'undefined') {
     return 'http://localhost:5000/api';
+  }
+
+  const { hostname, origin } = window.location;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return 'http://localhost:5000/api';
+  }
+
+  return `${origin}/api`;
+};
+
+const normalizeApiBaseUrl = (value) => {
+  const raw = String(value || getDefaultApiBaseUrl()).trim().replace(/\/+$/, '');
+  if (!raw) {
+    return getDefaultApiBaseUrl();
   }
 
   if (raw.endsWith('/api')) {

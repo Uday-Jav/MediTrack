@@ -4,6 +4,7 @@ const { Pool } = require("pg");
 
 const parseBoolean = (value) => String(value || "").trim().toLowerCase() === "true";
 const hasBooleanEnv = (value) => ["true", "false"].includes(String(value || "").trim().toLowerCase());
+const hasConfiguredValue = (value) => String(value ?? "").trim() !== "";
 
 const shouldUseSslFromConnectionString = (connectionString) => {
   try {
@@ -23,6 +24,19 @@ const shouldUseSslFromConnectionString = (connectionString) => {
 
 let activePool = null;
 let usingInMemoryDb = false;
+
+const hasExplicitPostgresConfig = () =>
+  [
+    process.env.DATABASE_URL,
+    process.env.POSTGRES_HOST,
+    process.env.POSTGRES_PORT,
+    process.env.POSTGRES_DB,
+    process.env.POSTGRES_USER,
+    process.env.POSTGRES_PASSWORD
+  ].some(hasConfiguredValue);
+
+const shouldAllowMemoryFallback = () =>
+  parseBoolean(process.env.POSTGRES_FALLBACK_MEMORY) || !hasExplicitPostgresConfig();
 
 const buildPoolConfig = () => {
   const connectionString = process.env.DATABASE_URL;
@@ -68,7 +82,7 @@ const createPgPool = () => {
   return pool;
 };
 
-const createInMemoryPool = () => {
+const createInMemoryPool = (reason = "") => {
   const { newDb } = require("pg-mem");
   const schemaPath = path.join(__dirname, "schema.sql");
   const schemaSql = fs.readFileSync(schemaPath, "utf8");
@@ -78,23 +92,26 @@ const createInMemoryPool = () => {
   const adapter = db.adapters.createPg();
   const pool = new adapter.Pool();
   usingInMemoryDb = true;
-  console.warn("Using in-memory PostgreSQL fallback (pg-mem).");
+  const suffix = reason ? ` ${reason}` : "";
+  console.warn(`Using in-memory PostgreSQL fallback (pg-mem).${suffix}`);
   return pool;
 };
 
 const getPool = () => {
   if (!activePool) {
-    activePool = createPgPool();
+    activePool = hasExplicitPostgresConfig()
+      ? createPgPool()
+      : createInMemoryPool("No PostgreSQL configuration was provided.");
   }
   return activePool;
 };
 
-const enableMemoryFallback = () => {
+const enableMemoryFallback = (reason = "") => {
   if (usingInMemoryDb && activePool) {
     return activePool;
   }
 
-  activePool = createInMemoryPool();
+  activePool = createInMemoryPool(reason);
   return activePool;
 };
 
@@ -108,26 +125,43 @@ const ensurePostgresConnection = async () => {
     client = await pool.connect();
     await client.query("SELECT 1");
     client.release();
-    console.log("PostgreSQL connected.");
+    console.log(
+      usingInMemoryDb ? "PostgreSQL fallback ready (in-memory)." : "PostgreSQL connected."
+    );
   } catch (error) {
     if (client) {
       client.release();
     }
 
-    if (!parseBoolean(process.env.POSTGRES_FALLBACK_MEMORY)) {
+    if (!shouldAllowMemoryFallback()) {
       throw error;
     }
 
     console.warn(`PostgreSQL connection failed (${error.message}).`);
-    const fallbackPool = enableMemoryFallback();
+    const fallbackPool = enableMemoryFallback("Continuing with demo-safe storage.");
     const fallbackClient = await fallbackPool.connect();
     await fallbackClient.query("SELECT 1");
     fallbackClient.release();
   }
 };
 
+const closePostgresConnection = async () => {
+  if (!activePool) {
+    return;
+  }
+
+  const pool = activePool;
+  activePool = null;
+  usingInMemoryDb = false;
+
+  if (typeof pool.end === "function") {
+    await pool.end();
+  }
+};
+
 module.exports = {
   query,
   ensurePostgresConnection,
+  closePostgresConnection,
   isUsingInMemoryDb: () => usingInMemoryDb
 };

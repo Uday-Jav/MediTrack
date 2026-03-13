@@ -4,6 +4,21 @@ import { FileUp, List, Clock, Activity, FileText, ChevronRight, Eye, Trash2, Loc
 import Button from '../components/Button';
 import { deleteRecordFile, getRecentRecords, getVaultStatus, refreshVaultStatus } from '../services/api';
 
+const formatStorage = (value) => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (value <= 0) {
+      return '0 MB';
+    }
+    return `${(value / 1024 / 1024).toFixed(2)} MB`;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return value;
+  }
+
+  return '0 MB';
+};
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState({ name: 'User' });
@@ -15,8 +30,8 @@ const Dashboard = () => {
   const getUserId = () => {
     try {
       const u = JSON.parse(localStorage.getItem('user') || '{}');
-      return u.id || '1';
-    } catch { return '1'; }
+      return u.id || u.userId || '';
+    } catch { return ''; }
   };
 
   useEffect(() => {
@@ -25,13 +40,11 @@ const Dashboard = () => {
       try { setUser(JSON.parse(storedUser)); } catch {}
     }
 
-    const userId = getUserId();
-
     // Fetch recent records
     const fetchRecent = async () => {
       try {
         setLoadingRecent(true);
-        const data = await getRecentRecords(userId);
+        const data = await getRecentRecords(getUserId() || null);
         let list = [];
         
         if (Array.isArray(data)) {
@@ -76,8 +89,7 @@ const Dashboard = () => {
     const fetchVault = async () => {
       try {
         setLoadingVault(true);
-        const data = await getVaultStatus(userId);
-        console.log("Vault Status API Response:", data);
+        const data = await getVaultStatus(getUserId() || null);
         
         let recordsCount = 0;
         let storage = '0 MB';
@@ -102,9 +114,7 @@ const Dashboard = () => {
 
           // Failsafe for object coercions
           if (typeof recordsCount === 'object') recordsCount = 0;
-          if (typeof storage === 'number') {
-             storage = (storage / 1024 / 1024).toFixed(2) + ' MB';
-          }
+          storage = formatStorage(storage);
           if (typeof storage !== 'string') storage = String(storage || '0 MB');
           if (storage === '[object Object]') storage = '0 MB';
           if (typeof activity === 'object' && activity !== null) activity = null;
@@ -139,8 +149,17 @@ const Dashboard = () => {
 
     try {
       await deleteRecordFile(record.fileUrl, password);
-      await refreshVaultStatus();
-      window.location.reload();
+      const refreshedStatus = await refreshVaultStatus();
+      setRecentRecords((prev) => prev.filter((entry) => (entry.id || entry._id) !== (record.id || record._id)));
+      setVaultStatus((prev) => {
+        const statsObj = refreshedStatus?.status || refreshedStatus?.storage || refreshedStatus || {};
+        return {
+          ...prev,
+          totalRecords: statsObj.totalRecords ?? prev.totalRecords,
+          storageUsed: formatStorage(statsObj.totalFileSize ?? statsObj.storageUsed ?? prev.storageUsed),
+          lastUpdated: statsObj.lastAddedAt ?? prev.lastUpdated,
+        };
+      });
     } catch (error) {
       console.error("Error deleting record:", error);
       alert(error.response?.data?.message || error.message || "Failed to delete record");
@@ -148,7 +167,7 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="w-full animate-fade-in">
+    <div className="page-shell">
       <div className="mb-10 text-center sm:text-left mt-8">
         <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight leading-tight">
           Welcome back, <br className="sm:hidden" /><span className="text-gradient">{user.name}</span>

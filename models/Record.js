@@ -16,6 +16,11 @@ const recordSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  type: {
+    type: String,
+    default: "Document",
+    trim: true
+  },
   description: {
     type: String,
     default: ""

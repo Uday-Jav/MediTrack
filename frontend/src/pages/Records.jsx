@@ -158,7 +158,7 @@ const Records = () => {
   };
 
   return (
-    <div className="w-full animate-fade-in relative z-10 hidden-scrollbar">
+    <div className="page-shell relative z-10 hidden-scrollbar">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
         <div>
           <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">

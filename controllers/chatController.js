@@ -15,6 +15,8 @@ const isMockAiEnabled = () =>
     .trim()
     .toLowerCase() === "true";
 
+const shouldUseMockResponse = () => isMockAiEnabled() || !process.env.OPENAI_API_KEY;
+
 const getOpenAiClient = () => {
   if (!process.env.OPENAI_API_KEY) {
     const error = new Error("OPENAI_API_KEY is not configured.");
@@ -242,7 +244,7 @@ const runStreamingCompletion = async ({
   userMessage,
   patientHistory
 }) => {
-  const useMockResponse = !process.env.OPENAI_API_KEY && isMockAiEnabled();
+  const useMockResponse = shouldUseMockResponse();
   const openai = useMockResponse ? null : getOpenAiClient();
   const model = useMockResponse ? null : getModelName();
   const abortController = new AbortController();
@@ -383,7 +385,7 @@ const handleChatRequest = async (req, res, next) => {
 
     let responseText = "";
 
-    if (!process.env.OPENAI_API_KEY && isMockAiEnabled()) {
+    if (shouldUseMockResponse()) {
       responseText = ensureDisclaimer(
         buildMockMedicalResponse({
           userMessage: payload.message,

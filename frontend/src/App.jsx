@@ -49,11 +49,17 @@ const AppShell = () => {
   }, [language, location.pathname]);
 
   return (
-    <div className="min-h-screen bg-transparent flex flex-col font-sans text-slate-900 relative dark:text-slate-100">
+    <div className="app-shell min-h-screen bg-transparent flex flex-col font-sans text-slate-900 relative dark:text-slate-100">
       <div className="mesh-bg"></div>
-      <Navbar />
-      
-      <main className="flex-1 relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-12">
+      {!isAuthPage && <Navbar />}
+
+      <main
+        className={
+          isAuthPage
+            ? 'auth-main flex-1 relative z-10'
+            : 'app-main flex-1 relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-12'
+        }
+      >
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />

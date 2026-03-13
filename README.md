@@ -56,7 +56,9 @@ Copy `.env.example` to `.env` and set:
 Optional local fallback flags:
 
 - `POSTGRES_FALLBACK_MEMORY=true` to run with in-memory PostgreSQL emulation if real PostgreSQL is unavailable
-- `MOCK_OPENAI_RESPONSE=true` to return deterministic mock medical guidance when `OPENAI_API_KEY` is not set
+- If no PostgreSQL config is provided at all, the app now falls back to in-memory PostgreSQL automatically for local/demo usage
+- If no `OPENAI_API_KEY` is present, the chatbot now falls back to deterministic mock medical guidance automatically
+- `MOCK_OPENAI_RESPONSE=true` still forces deterministic mock medical guidance even when an OpenAI key exists
 - For Render/Postgres TLS: set `POSTGRES_SSL=true` and keep `POSTGRES_SSL_REJECT_UNAUTHORIZED=false` if your DB requires SSL without custom CA certs
 
 Mongo env vars are optional unless you also use legacy `/api/auth` and `/api/records` endpoints.
@@ -83,6 +85,12 @@ psql "$DATABASE_URL" -f db/seed.sql
 ```bash
 npm install
 npm run dev
+```
+
+Smoke-test the backend auth and records flow:
+
+```bash
+npm run smoke:api
 ```
 
 ## Core API

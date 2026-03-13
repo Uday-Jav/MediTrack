@@ -14,12 +14,12 @@ const UploadRecord = () => {
   const [isDragActive, setIsDragActive] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
-  const getUserId = () => {
+  const getStoredUser = () => {
     try {
       return JSON.parse(localStorage.getItem('user') || '{}');
     } catch { return {}; }
   };
-  const user = getUserId();
+  const user = getStoredUser();
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -64,9 +64,9 @@ const UploadRecord = () => {
     setStatus({ type: '', message: '' });
 
     const uploadData = new FormData();
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const user = getStoredUser();
     uploadData.append('file', file);
-    uploadData.append('patientId', user.id || '');
+    uploadData.append('patientId', user.id || user.userId || '');
     uploadData.append('title', formData.title);
     uploadData.append('description', formData.description);
     uploadData.append('type', formData.type);
@@ -94,7 +94,7 @@ const UploadRecord = () => {
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full animate-fade-in relative z-10">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full page-shell relative z-10">
       <div className="mb-10 text-center sm:text-left">
         <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight flex items-center justify-center sm:justify-start gap-4">
           <div className="p-3 bg-gradient-to-br from-brand-400 to-brand-600 rounded-2xl shadow-glow">
